@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Healthier - Medical Diagnosis System</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body class="bg-gray-50">
+    <!-- Navbar -->
+    <nav class="bg-blue-600 p-4 shadow-lg">
+        <div class="container mx-auto">
+            <h1 class="text-3xl font-bold text-white">Healthier</h1>
+            <p class="text-blue-100">Medical Diagnosis System</p>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-6">
+        <!-- Selected Symptoms -->
+        <div class="mb-6">
+            <h2 class="text-xl font-semibold mb-3">Selected Symptoms</h2>
+            <div id="selected-symptoms" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <!-- Available Symptoms -->
+        <div class="mb-8">
+            <h2 class="text-xl font-semibold mb-3">Available Symptoms</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {% for symptom in symptoms %}
+                <button 
+                    class="symptom-btn bg-white hover:bg-blue-50 border border-gray-300 rounded-lg px-4 py-2 text-gray-700 hover:border-blue-500 transition-colors"
+                    data-symptom="{{ symptom }}"
+                    data-severity="{{ severities.get(symptom, 1) }}">
+                    {{ symptom.replace('_', ' ').capitalize()}}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Diagnose Button -->
+        <div class="text-center mb-8">
+            <button 
+                id="diagnose-btn"
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled>
+                Diagnose
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="space-y-6 hidden">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Diagnosis Results</h2>
+            <div id="predictions" class="space-y-8"></div>
+        </div>
+
+        <!-- X-ray Modal -->
+        <div id="xray-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+                <h3 class="text-xl font-bold mb-4">Upload X-ray Image</h3>
+                <p id="xray-disease-info" class="mb-4"></p>
+                
+                <form id="xray-form" class="space-y-4">
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                        <input type="file" id="xray-input" accept=".jpg,.jpeg,.png" class="hidden">
+                        <label for="xray-input" class="cursor-pointer block text-center">
+                            <div id="preview-container" class="hidden mb-4">
+                                <img id="xray-preview" class="max-h-64 mx-auto" alt="X-ray preview">
+                            </div>
+                            <div id="upload-prompt" class="py-8">
+                                <p class="text-gray-500">Click to upload or drag and drop</p>
+                                <p class="text-sm text-gray-400">PNG, JPG, JPEG (max. 16MB)</p>
+                            </div>
+                        </label>
+                    </div>
+                    
+                    <div class="flex justify-end gap-4">
+                        <button type="button" class="cancel-xray px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50" disabled>
+                            Analyze X-ray
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let selectedSymptoms = new Set();
+            let currentDisease = null;
+
+            // Dummy data for graphs (8 unique X-ray diseases + 10 random diseases)
+            const dummyData = {
+                "Pneumonia": [120, 140, 160, 180, 200, 220],
+                "COVID-19": [200, 220, 240, 260, 280, 300],
+                "Lung Cancer": [80, 90, 100, 110, 120, 130],
+                "Tuberculosis": [150, 160, 170, 180, 190, 200],
+                "Cardiomegaly": [60, 70, 80, 90, 100, 110],
+                "Emphysema": [40, 50, 60, 70, 80, 90],
+                "Edema": [100, 110, 120, 130, 140, 150],
+                "Fibrosis": [70, 80, 90, 100, 110, 120],
+                "Diabetes": [300, 320, 340, 360, 380, 400],
+                "Hypertension": [250, 260, 270, 280, 290, 300],
+                "Asthma": [200, 210, 220, 230, 240, 250],
+                "Arthritis": [150, 160, 170, 180, 190, 200],
+                "Migraine": [100, 110, 120, 130, 140, 150],
+                "Bronchitis": [80, 90, 100, 110, 120, 130],
+                "Gastritis": [70, 80, 90, 100, 110, 120],
+                "Sinusitis": [60, 70, 80, 90, 100, 110],
+                "Anemia": [50, 60, 70, 80, 90, 100],
+                "Allergy": [40, 50, 60, 70, 80, 90]
+            };
+
+            // Handle symptom selection
+            $('.symptom-btn').click(function() {
+                const symptom = $(this).data('symptom');
+                if (!selectedSymptoms.has(symptom)) {
+                    selectedSymptoms.add(symptom);
+                    $(this).addClass('bg-gray-200').prop('disabled', true);
+                    
+                    $('#selected-symptoms').append(`
+                        <div class="selected-symptom bg-blue-100 text-blue-800 px-3 py-1 rounded-full flex items-center gap-2">
+                            <span>${symptom.replace('_',' ')}</span>
+                            <button class="remove-symptom hover:text-red-600" data-symptom="${symptom}">×</button>
+                        </div>
+                    `);
+
+                    updateDiagnoseButton();
+                }
+            });
+
+            // Handle symptom removal
+            $(document).on('click', '.remove-symptom', function() {
+                const symptom = $(this).data('symptom');
+                selectedSymptoms.delete(symptom);
+                $(this).parent().remove();
+                $(`.symptom-btn[data-symptom="${symptom}"]`).removeClass('bg-gray-200').prop('disabled', false);
+                updateDiagnoseButton();
+            });
+
+            // Update diagnose button state
+            function updateDiagnoseButton() {
+                $('#diagnose-btn').prop('disabled', selectedSymptoms.size === 0);
+            }
+
+            // Handle diagnosis
+            $('#diagnose-btn').click(function() {
+                $.ajax({
+                    url: '/predict',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        symptoms: Array.from(selectedSymptoms)
+                    }),
+                    success: function(predictions) {
+                        $('#results').removeClass('hidden');
+                        $('#predictions').empty();
+
+                        predictions.forEach(function(prediction) {
+                            const cardHtml = `
+                                <div class="bg-white rounded-lg shadow-lg p-6">
+                                    <div class="flex justify-between items-start mb-4">
+                                        <div>
+                                            <h3 class="text-xl font-bold text-gray-800">${prediction.disease}</h3>
+                                            <p class="text-gray-600">Confidence: ${prediction.confidence.toFixed(1)}%</p>
+                                            <p class="text-gray-600">Severity: ${prediction.severity}/10</p>
+                                        </div>
+                                    </div>
+                                    ${prediction.precautions.length > 0 ? `
+                                        <div class="mt-4">
+                                            <h4 class="font-semibold mb-2">Precautions:</h4>
+                                            <ul class="list-disc pl-5">
+                                                ${prediction.precautions.map(p => `<li>${p}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+                                    ${prediction.needs_xray ? `
+                                        <div class="mt-4">
+                                            <button class="request-xray bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                                                    data-disease="${prediction.disease}">
+                                                Upload X-ray
+                                            </button>
+                                        </div>
+                                    ` : ''}
+                                    <!-- Graph for the disease -->
+                                    <div class="mt-6">
+                                        <div id="graph-${prediction.disease.replace(/ /g, '-')}" class="w-full h-64"></div>
+                                    </div>
+                                </div>
+                            `;
+                            $('#predictions').append(cardHtml);
+
+                            // Plot the graph for the disease
+                            const years = [2018, 2019, 2020, 2021, 2022, 2023];
+                            const data = dummyData[prediction.disease] || [0, 0, 0, 0, 0, 0];
+                            const graphData = [{
+                                x: years,
+                                y: data,
+                                type: 'scatter',
+                                mode: 'lines+markers',
+                                marker: { color: '#3b82f6' }
+                            }];
+                            const layout = {
+                                title: `${prediction.disease} Cases Over Time`,
+                                xaxis: { title: 'Year' },
+                                yaxis: { title: 'Cases' }
+                            };
+                            Plotly.newPlot(`graph-${prediction.disease.replace(/ /g, '-')}`, graphData, layout);
+                        });
+                    }
+                });
+            });
+
+            // Handle X-ray upload request
+            $(document).on('click', '.request-xray', function() {
+                currentDisease = $(this).data('disease');
+                $('#xray-disease-info').text(`Please upload an X-ray image for ${currentDisease} diagnosis confirmation.`);
+                $('#xray-modal').addClass('flex').removeClass('hidden');
+            });
+
+            // Handle X-ray modal close
+            $('.cancel-xray').click(function() {
+                $('#xray-modal').removeClass('flex').addClass('hidden');
+                $('#xray-preview').attr('src', '');
+                $('#preview-container').addClass('hidden');
+                $('#upload-prompt').removeClass('hidden');
+                $('#xray-input').val('');
+                $('#xray-form button[type="submit"]').prop('disabled', true);
+            });
+
+            // Handle X-ray file input
+            $('#xray-input').change(function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        $('#xray-preview').attr('src', e.target.result);
+                        $('#preview-container').removeClass('hidden');
+                        $('#upload-prompt').addClass('hidden');
+                        $('#xray-form button[type="submit"]').prop('disabled', false);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            // Handle X-ray form submission
+            $('#xray-form').submit(function(e) {
+                e.preventDefault();
+                const formData = new FormData();
+                formData.append('xray', $('#xray-input')[0].files[0]);
+                formData.append('disease', currentDisease);
+
+                $.ajax({
+                    url: '/upload_xray',
+                    method: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        // Display severity in a card instead of an alert
+                        const severity = (100 - response.confidence * 100).toFixed(2);
+                        $('#predictions').append(`
+                            <div class="bg-white rounded-lg shadow-lg p-6 mt-6">
+                                <h3 class="text-xl font-bold text-gray-800">X-ray Analysis Result</h3>
+                                <p class="text-gray-600">Severity: ${severity}%</p>
+                                <img src="${response.image_url}" class="mt-4 max-w-full h-auto rounded-lg">
+                            </div>
+                        `);
+                        $('.cancel-xray').click();
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
